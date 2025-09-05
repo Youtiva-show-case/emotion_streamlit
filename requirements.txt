@@ -1,12 +1,5 @@
-tensorflow==2.15.0
-scikit-learn
-matplotlib
-pandas
-numpy==1.23.5
-seaborn
-Pillow
-psutil
 streamlit
 opencv-python==4.8.1.78
-h5py
-streamlit
+Pillow
+requests
+numpy

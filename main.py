@@ -1,10 +1,10 @@
-import streamlit as st
 import cv2
-import tensorflow
-from tensorflow.keras.models import load_model
 import numpy as np
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 import time
+import requests
+import io
+from PIL import Image
+import streamlit as st
 
 # Configure Streamlit page
 st.set_page_config(
@@ -13,23 +13,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize session state
-if 'detection_active' not in st.session_state:
-    st.session_state.detection_active = False
-if 'emotion_history' not in st.session_state:
-    st.session_state.emotion_history = []
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-@st.cache_resource
-def load_model_and_cascade():
-    """Load the trained model and face cascade classifier"""
-    try:
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        trained_model = load_model("trained_models/model_tf_e.h5")
-        return trained_model, face_cascade
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None, None
-
+print("loaded face cascade")
 # Mapping of emotion indices to emotion labels
 emotion_dict = {
     0: 'Surprise',
@@ -40,6 +26,7 @@ emotion_dict = {
     5: 'Angry',
     6: 'Neutral'
 }
+print("loaded emotion_dict")
 
 # Define emotion colors for visual feedback
 emotion_colors = {
@@ -52,8 +39,50 @@ emotion_colors = {
     'Neutral': '#808080'
 }
 
-def classifyEmotionFromFace(trained_model, face_cascade, frame):
-    """Classify emotions from detected faces"""
+def detect_emotion_from_api(frame):
+    """Send frame to emotion detection API and get results"""
+    try:
+        # Convert frame to PIL Image
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(frame_rgb)
+        
+        # Convert to bytes
+        img_byte_arr = io.BytesIO()
+        pil_image.save(img_byte_arr, format='JPEG')
+        img_byte_arr.seek(0)
+        
+        # Prepare the request
+        files = {
+            'file': ('image.jpg', img_byte_arr, 'image/jpeg')
+        }
+        
+        # Make API call
+        response = requests.post(
+            'https://emotions-from-face-production.up.railway.app/emotion/detect',
+            files=files,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if result.get('success') and 'emotion' in result:
+                emotion = result['emotion']
+                face_coords = result.get('face_coordinates', {})
+                return emotion, face_coords
+            else:
+                return "Unknown", {}
+        else:
+            return "API Error", {}
+            
+    except requests.exceptions.Timeout:
+        return "Timeout", {}
+    except requests.exceptions.RequestException as e:
+        return "Request Error", {}
+    except Exception as e:
+        return "Error", {}
+
+# Function to classify emotions from detected faces using API
+def classifyEmotionFromFace(face_cascade, frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
     
@@ -63,34 +92,23 @@ def classifyEmotionFromFace(trained_model, face_cascade, frame):
         x, y, width, height = biggest_face
         
         try:
-            # Extract and preprocess the face
-            face = frame[y:y+height, x:x+width]
-            face = cv2.resize(face, (100, 100))
-            face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            face_array = np.expand_dims(face, axis=0)
-            face_array = preprocess_input(face_array)
-            face_array = face_array / 255.0
-
-            # Predict the emotion
-            prediction = trained_model.predict(face_array, verbose=0)
-            maxindex = int(np.argmax(prediction))
-            confidence = float(np.max(prediction))
-            return emotion_dict[maxindex], (x, y, width, height), confidence
+            # Call API for emotion detection on the whole frame
+            emotion, api_face_coords = detect_emotion_from_api(frame)
+            return emotion, (x, y, width, height)
         except Exception as e:
-            return "Error", None, 0.0
+            return "Error on classification", None
     else:
-        return "No face detected", None, 0.0
+        return "No face detected", None
 
 def main():
     st.title("🎭 Real-time Emotion Detection")
-    st.markdown("**Detect emotions from your camera feed in real-time!**")
+    st.markdown("**Detect emotions from your camera feed using AI API!**")
     
-    # Load model and cascade
-    trained_model, face_cascade = load_model_and_cascade()
-    
-    if trained_model is None or face_cascade is None:
-        st.error("Failed to load model or face cascade. Please check if the model file exists at 'trained_models/model_tf_e.h5'")
-        return
+    # Initialize session state
+    if 'detection_active' not in st.session_state:
+        st.session_state.detection_active = False
+    if 'emotion_history' not in st.session_state:
+        st.session_state.emotion_history = []
     
     # Sidebar controls
     st.sidebar.title("Controls")
@@ -99,18 +117,19 @@ def main():
     camera_index = st.sidebar.selectbox("Select Camera", [0, 1, 2], index=0)
     
     # Detection interval
-    detection_interval = st.sidebar.slider(
-        "Detection Interval (seconds)",
-        min_value=0.1,
-        max_value=2.0,
-        value=1.0,
-        step=0.1,
-        help="How often to run emotion detection (lower = more frequent but slower)"
-    )
+    detection_interval = 2.0  # 2 seconds
+    st.sidebar.info(f"API calls every {detection_interval} seconds")
     
-    # Start/Stop detection
-    if st.sidebar.button("Start Detection" if not st.session_state.detection_active else "Stop Detection"):
-        st.session_state.detection_active = not st.session_state.detection_active
+    # Start and Stop buttons
+    start_col, stop_col = st.sidebar.columns(2)
+    
+    with start_col:
+        if st.button("Start Detection", disabled=st.session_state.detection_active):
+            st.session_state.detection_active = True
+    
+    with stop_col:
+        if st.button("Stop Detection", disabled=not st.session_state.detection_active):
+            st.session_state.detection_active = False
     
     # Clear history
     if st.sidebar.button("Clear History"):
@@ -126,7 +145,6 @@ def main():
     with col2:
         st.subheader("Current Emotion")
         emotion_placeholder = st.empty()
-        confidence_placeholder = st.empty()
         
         st.subheader("Emotion History")
         history_placeholder = st.empty()
@@ -141,7 +159,8 @@ def main():
         
         last_prediction_time = time.time()
         current_emotion = "Starting..."
-        current_confidence = 0.0
+        
+        print("Camera opened. Detection started.")
         
         try:
             while st.session_state.detection_active:
@@ -150,26 +169,25 @@ def main():
                     st.error("Failed to read from camera")
                     break
                 
-                # Check if it's time for a new prediction
+                # Check if 2 seconds has passed since last prediction (to avoid too many API calls)
                 current_time = time.time()
                 if current_time - last_prediction_time >= detection_interval:
-                    emotion, face_coords, confidence = classifyEmotionFromFace(trained_model, face_cascade, frame)
+                    emotion, face_coords = classifyEmotionFromFace(face_cascade, frame)
                     current_emotion = emotion
-                    current_confidence = confidence
                     last_prediction_time = current_time
+                    print(f"Detected emotion: {current_emotion}")
                     
                     # Add to history if it's a valid emotion
-                    if emotion in emotion_dict.values():
+                    if emotion in emotion_colors.keys() or emotion in ["Unknown", "API Error", "Timeout", "Request Error"]:
                         st.session_state.emotion_history.append({
                             'emotion': emotion,
-                            'confidence': confidence,
                             'time': time.strftime("%H:%M:%S")
                         })
                         # Keep only last 10 entries
                         if len(st.session_state.emotion_history) > 10:
                             st.session_state.emotion_history.pop(0)
                 
-                # Draw face detection and emotion on frame
+                # Draw face detection box and emotion text only for the biggest face
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
                 
@@ -179,11 +197,10 @@ def main():
                     x, y, w, h = biggest_face
                     
                     # Draw rectangle around the biggest face
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
                     
                     # Add emotion text above the biggest face
-                    cv2.putText(frame, f"{current_emotion}", (x, y-30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(frame, f"Conf: {current_confidence:.2f}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(frame, current_emotion, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
                 
                 # Convert BGR to RGB for Streamlit
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -203,13 +220,11 @@ def main():
                 else:
                     emotion_placeholder.info(current_emotion)
                 
-                confidence_placeholder.metric("Confidence", f"{current_confidence:.2%}")
-                
                 # Update history display
                 if st.session_state.emotion_history:
                     history_text = ""
                     for entry in reversed(st.session_state.emotion_history[-5:]):  # Show last 5
-                        history_text += f"**{entry['time']}**: {entry['emotion']} ({entry['confidence']:.1%})\n\n"
+                        history_text += f"**{entry['time']}**: {entry['emotion']}\n\n"
                     history_placeholder.markdown(history_text)
                 
                 # Small delay to prevent overwhelming the UI
@@ -219,6 +234,7 @@ def main():
             st.error(f"Error during detection: {e}")
         finally:
             cap.release()
+            print("Camera released and detection stopped.")
     else:
         # Show placeholder when detection is not active
         frame_placeholder.info("Click 'Start Detection' to begin emotion detection")

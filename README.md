@@ -1,40 +1,26 @@
 # 🎭 Real-time Emotion Detection with Streamlit
 
-A Streamlit web application that performs real-time emotion detection using your camera feed. The app uses computer vision and deep learning to classify emotions from facial expressions.
+A Streamlit web application that performs real-time emotion detection using your camera feed. The app uses an AI API service to classify emotions from facial expressions in real-time.
 
 ## Features
 
-- **Real-time emotion detection** from camera feed
+- **Real-time emotion detection** from camera feed via AI API
 - **7 emotion categories**: Surprise, Fear, Disgust, Happy, Sad, Angry, Neutral
 - **Visual feedback** with colored emotion indicators
 - **Face detection** with bounding boxes
 - **Emotion history** tracking
-- **Adjustable detection intervals** for performance optimization
+- **API-based processing** for accurate results
 - **Multiple camera support**
 
 ## Setup Instructions
 
 ### 1. Install Dependencies
 
-**Option A: Use Compatible Version (Recommended)**
-```bash
-pip install -r requirements_compatible.txt
-```
-
-**Option B: Use Latest Version (May require compatibility fixes)**
 ```bash
 pip install -r requirements.txt
 ```
 
-> **Note:** Your model was created with Keras 2.10.0. For best compatibility, use Option A.
-
-### 2. Add Your Trained Model
-
-Place your trained emotion classification model in the `trained_models/` directory:
-- The model file should be named `model_tf_e.h5`
-- Path: `trained_models/model_tf_e.h5`
-
-### 3. Run the Application
+### 2. Run the Application
 
 ```bash
 streamlit run main.py
@@ -44,19 +30,19 @@ streamlit run main.py
 
 1. **Start the app**: Run the command above and open the provided URL in your browser
 2. **Camera setup**: Select your camera from the dropdown in the sidebar
-3. **Adjust settings**: Use the detection interval slider to balance performance and accuracy
-4. **Start detection**: Click the "Start Detection" button in the sidebar
-5. **Position yourself**: Make sure your face is visible in the camera feed
-6. **View results**: Watch as the app detects and classifies your emotions in real-time
+3. **Start detection**: Click the "Start Detection" button in the sidebar
+4. **Position yourself**: Make sure your face is visible in the camera feed
+5. **View results**: Watch as the app detects and classifies your emotions via AI API calls
 
 ## Technical Details
 
-### Model Requirements
+### API Integration
 
-The app expects a TensorFlow/Keras model (`model_tf_e.h5`) that:
-- Takes 100x100 RGB images as input
-- Outputs predictions for 7 emotion classes
-- Uses the emotion mapping: {0: 'Surprise', 1: 'Fear', 2: 'Disgust', 3: 'Happy', 4: 'Sad', 5: 'Angry', 6: 'Neutral'}
+The app uses an external AI API for emotion detection:
+- API endpoint: `https://emotions-from-face-production.up.railway.app/emotion/detect`
+- Sends camera frames as JPEG images to the API
+- Receives emotion predictions with 7 categories: Surprise, Fear, Disgust, Happy, Sad, Angry, Neutral
+- API calls are made every 2 seconds to optimize performance
 
 ### Face Detection
 
@@ -66,9 +52,9 @@ The app expects a TensorFlow/Keras model (`model_tf_e.h5`) that:
 
 ### Performance
 
-- Configurable detection intervals (0.1 to 2.0 seconds)
+- API calls every 2 seconds to balance accuracy and performance
 - Runs at approximately 30 FPS for smooth video display
-- Uses Streamlit's caching for efficient model loading
+- Handles API timeouts and errors gracefully
 
 ## Troubleshooting
 
@@ -77,21 +63,21 @@ The app expects a TensorFlow/Keras model (`model_tf_e.h5`) that:
 - Ensure camera permissions are granted to your browser
 - Check that no other applications are using the camera
 
-### Model Issues
-- Verify the model file exists at `trained_models/model_tf_e.h5`
-- Ensure the model is compatible with TensorFlow/Keras
-- Check that the model expects 100x100 RGB input images
+### API Issues
+- Check your internet connection
+- Verify the API endpoint is accessible
+- Monitor for API timeout errors in the app
 
 ### Performance Issues
-- Increase the detection interval for better performance
+- The app automatically limits API calls to every 2 seconds
 - Close other resource-intensive applications
-- Use a lower resolution camera if available
+- Ensure stable internet connection for API calls
 
 ## Dependencies
 
 - `streamlit`: Web app framework
 - `opencv-python`: Computer vision and camera capture
-- `tensorflow`: Deep learning model inference
+- `requests`: HTTP client for API calls
 - `numpy`: Numerical computations
 - `Pillow`: Image processing support
 
