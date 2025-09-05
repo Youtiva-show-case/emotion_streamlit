@@ -151,90 +151,82 @@ def main():
     
     # Camera processing
     if st.session_state.detection_active:
-        cap = cv2.VideoCapture(camera_index)
+        # Use Streamlit's camera input instead of cv2.VideoCapture
+        camera_image = st.camera_input("Camera is active - detecting emotions", key="camera_feed")
         
-        if not cap.isOpened():
-            st.error(f"Cannot open camera {camera_index}")
-            return
-        
-        last_prediction_time = time.time()
-        current_emotion = "Starting..."
-        
-        print("Camera opened. Detection started.")
-        
-        try:
-            while st.session_state.detection_active:
-                ret, frame = cap.read()
-                if not ret:
-                    st.error("Failed to read from camera")
-                    break
+        if camera_image is not None:
+            # Convert camera image to OpenCV format
+            image = Image.open(camera_image)
+            frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            
+            # Check if 2 seconds has passed since last prediction
+            if 'last_prediction_time' not in st.session_state:
+                st.session_state.last_prediction_time = 0
+            
+            current_time = time.time()
+            if current_time - st.session_state.last_prediction_time >= detection_interval:
+                emotion, face_coords = classifyEmotionFromFace(face_cascade, frame)
+                current_emotion = emotion
+                st.session_state.last_prediction_time = current_time
+                print(f"Detected emotion: {current_emotion}")
                 
-                # Check if 2 seconds has passed since last prediction (to avoid too many API calls)
-                current_time = time.time()
-                if current_time - last_prediction_time >= detection_interval:
-                    emotion, face_coords = classifyEmotionFromFace(face_cascade, frame)
-                    current_emotion = emotion
-                    last_prediction_time = current_time
-                    print(f"Detected emotion: {current_emotion}")
-                    
-                    # Add to history if it's a valid emotion
-                    if emotion in emotion_colors.keys() or emotion in ["Unknown", "API Error", "Timeout", "Request Error"]:
-                        st.session_state.emotion_history.append({
-                            'emotion': emotion,
-                            'time': time.strftime("%H:%M:%S")
-                        })
-                        # Keep only last 10 entries
-                        if len(st.session_state.emotion_history) > 10:
-                            st.session_state.emotion_history.pop(0)
+                # Add to history if it's a valid emotion
+                if emotion in emotion_colors.keys() or emotion in ["Unknown", "API Error", "Timeout", "Request Error"]:
+                    st.session_state.emotion_history.append({
+                        'emotion': emotion,
+                        'time': time.strftime("%H:%M:%S")
+                    })
+                    # Keep only last 10 entries
+                    if len(st.session_state.emotion_history) > 10:
+                        st.session_state.emotion_history.pop(0)
+            else:
+                current_emotion = st.session_state.get('current_emotion', 'Starting...')
+            
+            # Draw face detection box and emotion text only for the biggest face
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            
+            if len(faces) > 0:
+                # Find and draw only the biggest face
+                biggest_face = max(faces, key=lambda rect: rect[2] * rect[3])
+                x, y, w, h = biggest_face
                 
-                # Draw face detection box and emotion text only for the biggest face
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+                # Draw rectangle around the biggest face
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
                 
-                if len(faces) > 0:
-                    # Find and draw only the biggest face
-                    biggest_face = max(faces, key=lambda rect: rect[2] * rect[3])
-                    x, y, w, h = biggest_face
-                    
-                    # Draw rectangle around the biggest face
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-                    
-                    # Add emotion text above the biggest face
-                    cv2.putText(frame, current_emotion, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
-                
-                # Convert BGR to RGB for Streamlit
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Display frame
-                frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
-                
-                # Update emotion display
-                if current_emotion in emotion_colors:
-                    emotion_placeholder.markdown(
-                        f"<div style='background-color: {emotion_colors[current_emotion]}; "
-                        f"padding: 20px; border-radius: 10px; text-align: center; color: white; font-size: 24px; font-weight: bold;'>"
-                        f"{current_emotion}"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
-                else:
-                    emotion_placeholder.info(current_emotion)
-                
-                # Update history display
-                if st.session_state.emotion_history:
-                    history_text = ""
-                    for entry in reversed(st.session_state.emotion_history[-5:]):  # Show last 5
-                        history_text += f"**{entry['time']}**: {entry['emotion']}\n\n"
-                    history_placeholder.markdown(history_text)
-                
-                # Small delay to prevent overwhelming the UI
-                time.sleep(0.03)
-                
-        except Exception as e:
-            st.error(f"Error during detection: {e}")
-        finally:
-            cap.release()
-            print("Camera released and detection stopped.")
+                # Add emotion text above the biggest face
+                cv2.putText(frame, current_emotion, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+            
+            # Convert BGR to RGB for Streamlit display
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Display frame
+            frame_placeholder.image(frame_rgb, channels="RGB", use_column_width=True)
+            
+            # Store current emotion in session state
+            st.session_state.current_emotion = current_emotion
+            
+            # Update emotion display
+            if current_emotion in emotion_colors:
+                emotion_placeholder.markdown(
+                    f"<div style='background-color: {emotion_colors[current_emotion]}; "
+                    f"padding: 20px; border-radius: 10px; text-align: center; color: white; font-size: 24px; font-weight: bold;'>"
+                    f"{current_emotion}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+            else:
+                emotion_placeholder.info(current_emotion)
+            
+            # Update history display
+            if st.session_state.emotion_history:
+                history_text = ""
+                for entry in reversed(st.session_state.emotion_history[-5:]):  # Show last 5
+                    history_text += f"**{entry['time']}**: {entry['emotion']}\n\n"
+                history_placeholder.markdown(history_text)
+        else:
+            frame_placeholder.info("Camera starting... Please allow camera access when prompted.")
+            emotion_placeholder.info("Waiting for camera...")
     else:
         # Show placeholder when detection is not active
         frame_placeholder.info("Click 'Start Detection' to begin emotion detection")
